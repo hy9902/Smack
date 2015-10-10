@@ -16,6 +16,7 @@
  */
 package org.jivesoftware.smack.tcp;
 
+import org.jivesoftware.smack.AbstractConnectionListener;
 import org.jivesoftware.smack.AbstractXMPPConnection;
 import org.jivesoftware.smack.ConnectionConfiguration;
 import org.jivesoftware.smack.ConnectionConfiguration.SecurityMode;
@@ -299,6 +300,14 @@ public class XMPPTCPConnection extends AbstractXMPPConnection {
     public XMPPTCPConnection(XMPPTCPConnectionConfiguration config) {
         super(config);
         this.config = config;
+        addConnectionListener(new AbstractConnectionListener() {
+            @Override
+            public void connectionClosedOnError(Exception e) {
+                if (e instanceof XMPPException.StreamErrorException) {
+                    dropSmState();
+                }
+            }
+        });
     }
 
     /**
@@ -367,13 +376,11 @@ public class XMPPTCPConnection extends AbstractXMPPConnection {
     protected synchronized void loginInternal(String username, String password, Resourcepart resource) throws XMPPException,
                     SmackException, IOException, InterruptedException {
         // Authenticate using SASL
-        saslAuthentication.authenticate(username, password);
+        saslAuthentication.authenticate(username, password, config.getAuthzid());
 
         // If compression is enabled then request the server to use stream compression. XEP-170
         // recommends to perform stream compression before resource binding.
-        if (config.isCompressionEnabled()) {
-            useCompression();
-        }
+        maybeEnableCompression();
 
         if (isSmResumptionPossible()) {
             smResumedSyncPoint.sendAndWaitForResponse(new Resume(clientHandledStanzasCount, smSessionId));
@@ -400,7 +407,7 @@ public class XMPPTCPConnection extends AbstractXMPPConnection {
             // connection instance though). This is used in writePackets to decide if stanzas should
             // be added to the unacknowledged stanzas queue, because they have to be added right
             // after the 'enable' stream element has been sent.
-            unacknowledgedStanzas = null;
+            dropSmState();
         }
         if (isSmAvailable() && useSm) {
             // Remove what is maybe left from previously stream managed sessions
@@ -739,12 +746,7 @@ public class XMPPTCPConnection extends AbstractXMPPConnection {
      * @return a instance of XMPPInputOutputStream or null if no suitable instance was found
      * 
      */
-    private XMPPInputOutputStream maybeGetCompressionHandler() {
-        Compress.Feature compression = getFeature(Compress.Feature.ELEMENT, Compress.NAMESPACE);
-        if (compression == null) {
-            // Server does not support compression
-            return null;
-        }
+    private static XMPPInputOutputStream maybeGetCompressionHandler(Compress.Feature compression) {
         for (XMPPInputOutputStream handler : SmackConfiguration.getCompresionHandlers()) {
                 String method = handler.getCompressionMethod();
                 if (compression.getMethods().contains(method))
@@ -776,11 +778,19 @@ public class XMPPTCPConnection extends AbstractXMPPConnection {
      * @throws NoResponseException 
      * @throws InterruptedException 
      */
-    private void useCompression() throws NotConnectedException, NoResponseException, XMPPException, InterruptedException {
+    private void maybeEnableCompression() throws NotConnectedException, NoResponseException, XMPPException, InterruptedException {
+        if (!config.isCompressionEnabled()) {
+            return;
+        }
         maybeCompressFeaturesReceived.checkIfSuccessOrWait();
+        Compress.Feature compression = getFeature(Compress.Feature.ELEMENT, Compress.NAMESPACE);
+        if (compression == null) {
+            // Server does not support compression
+            return;
+        }
         // If stream compression was offered by the server and we want to use
         // compression then send compression request to the server
-        if ((compressionHandler = maybeGetCompressionHandler()) != null) {
+        if ((compressionHandler = maybeGetCompressionHandler(compression)) != null) {
             compressSyncPoint.sendAndWaitForResponseOrThrow(new Compress(compressionHandler.getCompressionMethod()));
         } else {
             LOGGER.warning("Could not enable compression because no matching handler/method pair was found");
@@ -1455,8 +1465,19 @@ public class XMPPTCPConnection extends AbstractXMPPConnection {
      * Set if Stream Management resumption should be used by default for new connections.
      * 
      * @param useSmResumptionDefault true to use Stream Management resumption for new connections.
+     * @deprecated use {@link #setUseStreamManagementResumptionDefault(boolean)} instead.
      */
+    @Deprecated
     public static void setUseStreamManagementResumptiodDefault(boolean useSmResumptionDefault) {
+        setUseStreamManagementDefault(useSmResumptionDefault);
+    }
+
+    /**
+     * Set if Stream Management resumption should be used by default for new connections.
+     *
+     * @param useSmResumptionDefault true to use Stream Management resumption for new connections.
+     */
+    public static void setUseStreamManagementResumptionDefault(boolean useSmResumptionDefault) {
         if (useSmResumptionDefault) {
             // Also enable SM is resumption is enabled
             setUseStreamManagementDefault(useSmResumptionDefault);
@@ -1712,6 +1733,17 @@ public class XMPPTCPConnection extends AbstractXMPPConnection {
         } else {
             return true;
         }
+    }
+
+    /**
+     * Drop the stream management state. Sets {@link #smSessionId} and
+     * {@link #unacknowledgedStanzas} to <code>null</code>.
+     */
+    private void dropSmState() {
+        // clientHandledCount and serverHandledCount will be reset on <enable/> and <enabled/>
+        // respective. No need to reset them here.
+        smSessionId = null;
+        unacknowledgedStanzas = null;
     }
 
     /**

@@ -96,7 +96,9 @@ import org.jxmpp.util.cache.ExpirationCache;
  * otherwise you may leak the instance.
  * </p>
  *
- * @author Gaston Dombiak, Larry Kirschner
+ * @author Gaston Dombiak
+ * @author Larry Kirschner
+ * @author Florian Schmaus
  */
 public class MultiUserChat {
     private static final Logger LOGGER = Logger.getLogger(MultiUserChat.class.getName());
@@ -192,7 +194,7 @@ public class MultiUserChat {
                     Presence oldPresence = occupantsMap.put(from, presence);
                     if (oldPresence != null) {
                         // Get the previous occupant's affiliation & role
-                        MUCUser mucExtension = MUCUser.from(packet);
+                        MUCUser mucExtension = MUCUser.from(oldPresence);
                         MUCAffiliation oldAffiliation = mucExtension.getItem().getAffiliation();
                         MUCRole oldRole = mucExtension.getItem().getRole();
                         // Get the new occupant's affiliation & role
@@ -362,12 +364,14 @@ public class MultiUserChat {
      * <p>
      * To create an "Instant Room", that means a room with some default configuration that is
      * available for immediate access, the room's owner should send an empty form after creating the
-     * room. {@link #sendConfigurationForm(Form)}
+     * room. Simply call {@link MucCreateConfigFormHandle#makeInstant()} on the returned {@link MucCreateConfigFormHandle}.
+     * </p>
      * <p>
      * To create a "Reserved Room", that means a room manually configured by the room creator before
      * anyone is allowed to enter, the room's owner should complete and send a form after creating
      * the room. Once the completed configuration form is sent to the server, the server will unlock
-     * the room. {@link #sendConfigurationForm(Form)}
+     * the room. You can use the returned {@link MucCreateConfigFormHandle} to configure the room.
+     * </p>
      * 
      * @param nickname the nickname to use.
      * @return a handle to the MUC create configuration form API.
@@ -401,7 +405,7 @@ public class MultiUserChat {
      * Create or join the MUC room with the given nickname.
      * 
      * @param nickname the nickname to use in the MUC room.
-     * @return A {@link MucCreateConfigFormHandle} if the room was created, or {code null} if the room was joined.
+     * @return A {@link MucCreateConfigFormHandle} if the room was created while joining, or {@code null} if the room was just joined.
      * @throws NoResponseException
      * @throws XMPPErrorException
      * @throws InterruptedException 
@@ -425,7 +429,7 @@ public class MultiUserChat {
      * @param password the password to use.
      * @param history the amount of discussion history to receive while joining a room.
      * @param timeout the amount of time to wait for a reply from the MUC service(in milliseconds).
-     * @return A {@link MucCreateConfigFormHandle} if the room was created, or {code null} if the room was joined.
+     * @return A {@link MucCreateConfigFormHandle} if the room was created while joining, or {@code null} if the room was just joined.
      * @throws XMPPErrorException if the room couldn't be created for some reason (e.g. 405 error if
      *         the user is not allowed to create the room)
      * @throws NoResponseException if there was no response from the server.
@@ -445,13 +449,13 @@ public class MultiUserChat {
     }
 
     /**
-     * Like {@link #create(Resourcepart)}, but will return true if the room creation was acknowledged by
+     * Like {@link #create(Resourcepart)}, but will return a {@link MucCreateConfigFormHandle} if the room creation was acknowledged by
      * the service (with an 201 status code). It's up to the caller to decide, based on the return
-     * value, if he needs to continue sending the room configuration. If false is returned, the room
+     * value, if he needs to continue sending the room configuration. If {@code null} is returned, the room
      * already existed and the user is able to join right away, without sending a form.
      *
      * @param mucEnterConfiguration the configuration used to enter the MUC.
-     * @return A {@link MucCreateConfigFormHandle} if the room was created, or {code null} if the room was joined.
+     * @return A {@link MucCreateConfigFormHandle} if the room was created while joining, or {@code null} if the room was just joined.
      * @throws XMPPErrorException if the room couldn't be created for some reason (e.g. 405 error if
      *         the user is not allowed to create the room)
      * @throws NoResponseException if there was no response from the server.
@@ -526,7 +530,7 @@ public class MultiUserChat {
      *
      * @param nickname the required nickname to use.
      * @param password the optional password required to join
-     * @return A {@link MucCreateConfigFormHandle} if the room was created, or {code null} if the room was joined.
+     * @return A {@link MucCreateConfigFormHandle} if the room was created while joining, or {@code null} if the room was just joined.
      * @throws NoResponseException
      * @throws XMPPErrorException
      * @throws NotConnectedException
@@ -1634,7 +1638,7 @@ public class MultiUserChat {
      * @return the occupant's current presence, or <tt>null</tt> if the user is unavailable
      *      or if no presence information is available.
      */
-    public Presence getOccupantPresence(String user) {
+    public Presence getOccupantPresence(EntityFullJid user) {
         return occupantsMap.get(user);
     }
 
@@ -1647,8 +1651,8 @@ public class MultiUserChat {
      * be: roomName@service/nickname (e.g. darkcave@macbeth.shakespeare.lit/thirdwitch).
      * @return the Occupant or <tt>null</tt> if the user is unavailable (i.e. not in the room).
      */
-    public Occupant getOccupant(String user) {
-        Presence presence = occupantsMap.get(user);
+    public Occupant getOccupant(EntityFullJid user) {
+        Presence presence = getOccupantPresence(user);
         if (presence != null) {
             return new Occupant(presence);
         }
@@ -2082,8 +2086,8 @@ public class MultiUserChat {
         boolean isUserModification,
         EntityFullJid from) {
         // Voice was granted to a visitor
-        if (("visitor".equals(oldRole) || "none".equals(oldRole))
-            && "participant".equals(newRole)) {
+        if ((MUCRole.visitor.equals(oldRole) || MUCRole.none.equals(oldRole))
+            && MUCRole.participant.equals(newRole)) {
             if (isUserModification) {
                 for (UserStatusListener listener : userStatusListeners) {
                     listener.voiceGranted();
@@ -2097,8 +2101,8 @@ public class MultiUserChat {
         }
         // The participant's voice was revoked from the room
         else if (
-            "participant".equals(oldRole)
-                && ("visitor".equals(newRole) || "none".equals(newRole))) {
+            MUCRole.participant.equals(oldRole)
+                && (MUCRole.visitor.equals(newRole) || MUCRole.none.equals(newRole))) {
             if (isUserModification) {
                 for (UserStatusListener listener : userStatusListeners) {
                     listener.voiceRevoked();
@@ -2111,8 +2115,8 @@ public class MultiUserChat {
             }
         }
         // Moderator privileges were granted to a participant
-        if (!"moderator".equals(oldRole) && "moderator".equals(newRole)) {
-            if ("visitor".equals(oldRole) || "none".equals(oldRole)) {
+        if (!MUCRole.moderator.equals(oldRole) && MUCRole.moderator.equals(newRole)) {
+            if (MUCRole.visitor.equals(oldRole) || MUCRole.none.equals(oldRole)) {
                 if (isUserModification) {
                     for (UserStatusListener listener : userStatusListeners) {
                         listener.voiceGranted();
@@ -2136,8 +2140,8 @@ public class MultiUserChat {
             }
         }
         // Moderator privileges were revoked from a participant
-        else if ("moderator".equals(oldRole) && !"moderator".equals(newRole)) {
-            if ("visitor".equals(newRole) || "none".equals(newRole)) {
+        else if (MUCRole.moderator.equals(oldRole) && !MUCRole.moderator.equals(newRole)) {
+            if (MUCRole.visitor.equals(newRole) || MUCRole.none.equals(newRole)) {
                 if (isUserModification) {
                     for (UserStatusListener listener : userStatusListeners) {
                         listener.voiceRevoked();
@@ -2211,7 +2215,7 @@ public class MultiUserChat {
         // first fire the "revoke" events and then fire the "grant" events.
 
         // The user's ownership to the room was revoked
-        if ("owner".equals(oldAffiliation) && !"owner".equals(newAffiliation)) {
+        if (MUCAffiliation.owner.equals(oldAffiliation) && !MUCAffiliation.owner.equals(newAffiliation)) {
             if (isUserModification) {
                 for (UserStatusListener listener : userStatusListeners) {
                     listener.ownershipRevoked();
@@ -2224,7 +2228,7 @@ public class MultiUserChat {
             }
         }
         // The user's administrative privileges to the room were revoked
-        else if ("admin".equals(oldAffiliation) && !"admin".equals(newAffiliation)) {
+        else if (MUCAffiliation.admin.equals(oldAffiliation) && !MUCAffiliation.admin.equals(newAffiliation)) {
             if (isUserModification) {
                 for (UserStatusListener listener : userStatusListeners) {
                     listener.adminRevoked();
@@ -2237,7 +2241,7 @@ public class MultiUserChat {
             }
         }
         // The user's membership to the room was revoked
-        else if ("member".equals(oldAffiliation) && !"member".equals(newAffiliation)) {
+        else if (MUCAffiliation.member.equals(oldAffiliation) && !MUCAffiliation.member.equals(newAffiliation)) {
             if (isUserModification) {
                 for (UserStatusListener listener : userStatusListeners) {
                     listener.membershipRevoked();
@@ -2251,7 +2255,7 @@ public class MultiUserChat {
         }
 
         // The user was granted ownership to the room
-        if (!"owner".equals(oldAffiliation) && "owner".equals(newAffiliation)) {
+        if (!MUCAffiliation.owner.equals(oldAffiliation) && MUCAffiliation.owner.equals(newAffiliation)) {
             if (isUserModification) {
                 for (UserStatusListener listener : userStatusListeners) {
                     listener.ownershipGranted();
@@ -2264,7 +2268,7 @@ public class MultiUserChat {
             }
         }
         // The user was granted administrative privileges to the room
-        else if (!"admin".equals(oldAffiliation) && "admin".equals(newAffiliation)) {
+        else if (!MUCAffiliation.admin.equals(oldAffiliation) && MUCAffiliation.admin.equals(newAffiliation)) {
             if (isUserModification) {
                 for (UserStatusListener listener : userStatusListeners) {
                     listener.adminGranted();
@@ -2277,7 +2281,7 @@ public class MultiUserChat {
             }
         }
         // The user was granted membership to the room
-        else if (!"member".equals(oldAffiliation) && "member".equals(newAffiliation)) {
+        else if (!MUCAffiliation.member.equals(oldAffiliation) && MUCAffiliation.member.equals(newAffiliation)) {
             if (isUserModification) {
                 for (UserStatusListener listener : userStatusListeners) {
                     listener.membershipGranted();

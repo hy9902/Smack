@@ -31,6 +31,7 @@ import org.jivesoftware.smack.util.CollectionUtil;
 import org.jivesoftware.smack.util.Objects;
 import org.jivesoftware.smack.util.StringUtils;
 import org.jxmpp.jid.DomainBareJid;
+import org.jxmpp.jid.EntityBareJid;
 import org.jxmpp.jid.parts.Resourcepart;
 import org.jxmpp.stringprep.XmppStringprepException;
 
@@ -82,6 +83,11 @@ public abstract class ConnectionConfiguration {
     private final Resourcepart resource;
 
     /**
+     * The optional SASL authorization identity (see RFC 6120 § 6.3.8).
+     */
+    private final EntityBareJid authzid;
+
+    /**
      * Initial presence as of RFC 6121 § 4.2
      * @see <a href="http://xmpp.org/rfcs/rfc6121.html#presence-initial">RFC 6121 § 4.2 Initial Presence</a>
      */
@@ -110,6 +116,7 @@ public abstract class ConnectionConfiguration {
     private final Set<String> enabledSaslMechanisms;
 
     protected ConnectionConfiguration(Builder<?,?> builder) {
+        authzid = builder.authzid;
         username = builder.username;
         password = builder.password;
         callbackHandler = builder.callbackHandler;
@@ -309,8 +316,8 @@ public abstract class ConnectionConfiguration {
     public static enum SecurityMode {
 
         /**
-         * Securirty via TLS encryption is required in order to connect. If the server
-         * does not offer TLS or if the TLS negotiaton fails, the connection to the server
+         * Security via TLS encryption is required in order to connect. If the server
+         * does not offer TLS or if the TLS negotiation fails, the connection to the server
          * will fail.
          */
         required,
@@ -359,6 +366,17 @@ public abstract class ConnectionConfiguration {
      */
     public Resourcepart getResource() {
         return resource;
+    }
+
+    /**
+     * Returns the optional XMPP address to be requested as the SASL authorization identity.
+     * 
+     * @return the authorization identifier.
+     * @see <a href="http://tools.ietf.org/html/rfc6120#section-6.3.8">RFC 6120 § 6.3.8. Authorization Identity</a>
+     * @since 4.2
+     */
+    public EntityBareJid getAuthzid() {
+        return authzid;
     }
 
     /**
@@ -425,6 +443,7 @@ public abstract class ConnectionConfiguration {
         private String[] enabledSSLProtocols;
         private String[] enabledSSLCiphers;
         private HostnameVerifier hostnameVerifier;
+        private EntityBareJid authzid;
         private CharSequence username;
         private String password;
         private Resourcepart resource;
@@ -738,7 +757,7 @@ public abstract class ConnectionConfiguration {
         /**
          * Perform authentication using SASL EXTERNAL. Your XMPP service must support this
          * authentication mechanism. This method also calls {@link #addEnabledSaslMechanism(String)} with "EXTERNAL" as
-         * argument. It also calls {@link #allowEmptyOrNullUsernames()} and {@link #setSecurityMode(SecurityMode)} to
+         * argument. It also calls {@link #allowEmptyOrNullUsernames()} and {@link #setSecurityMode(ConnectionConfiguration.SecurityMode)} to
          * {@link SecurityMode#required}.
          *
          * @return a reference to this builder.
@@ -800,6 +819,25 @@ public abstract class ConnectionConfiguration {
                 enabledSaslMechanisms = new HashSet<>(saslMechanisms.size());
             }
             enabledSaslMechanisms.addAll(saslMechanisms);
+            return getThis();
+        }
+
+        /**
+         * Set the XMPP address to be used as authorization identity.
+         * <p>
+         * In XMPP, authorization identities are bare jids. In general, callers should allow the server to select the
+         * authorization identifier automatically, and not call this. Note that setting the authzid does not set the XMPP
+         * service domain, which should typically match.
+         * Calling this will also SASL CRAM, since this mechanism does not support authzid.
+         * </p>
+         * 
+         * @param authzid The BareJid to be requested as the authorization identifier.
+         * @return a reference to this builder.
+         * @see <a href="http://tools.ietf.org/html/rfc6120#section-6.3.8">RFC 6120 § 6.3.8. Authorization Identity</a>
+         * @since 4.2
+         */
+        public B setAuthzid(EntityBareJid authzid) {
+            this.authzid = authzid;
             return getThis();
         }
 

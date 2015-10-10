@@ -1,6 +1,6 @@
 /**
  *
- * Copyright the original author or authors
+ * Copyright 2015 Florian Schmaus
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,33 +14,28 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.jivesoftware.smack.sasl.javax;
+package org.jivesoftware.smackx.disco;
 
 /**
- * Implementation of the SASL PLAIN mechanism.
+ * Utility class for Features.
  *
- * @author Jay Kline
+ * @author Florian Schmaus
+ *
  */
-public class SASLPlainMechanism extends SASLJavaXMechanism {
+public class Feature {
 
-    public static final String NAME = PLAIN;
+    public enum Support {
+        optional,
+        recommended,
+        required,
+        ;
 
-    public String getName() {
-        return NAME;
-    }
+        public boolean isRequired() {
+            return this == required;
+        }
 
-    @Override
-    public boolean authzidSupported() {
-      return true;
-    }
-
-    @Override
-    public int getPriority() {
-        return 400;
-    }
-
-    @Override
-    public SASLPlainMechanism newInstance() {
-        return new SASLPlainMechanism();
+        public boolean isNotRequired() {
+            return !isRequired();
+        }
     }
 }
